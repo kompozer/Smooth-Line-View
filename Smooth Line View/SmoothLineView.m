@@ -44,9 +44,11 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 
 @interface SmoothLineView ()
 
-@property (nonatomic,assign) CGPoint currentPoint;
-@property (nonatomic,assign) CGPoint previousPoint;
-@property (nonatomic,assign) CGPoint previousPreviousPoint;
+@property (nonatomic, assign) CGPoint currentPoint;
+@property (nonatomic, assign) CGPoint previousPoint;
+@property (nonatomic, assign) CGPoint previousPreviousPoint;
+@property (nonatomic, strong) NSMutableArray *subpaths;
+@property (nonatomic, assign) NSUInteger lastOperationStartIndex;
 
 @end
 
@@ -88,6 +90,8 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
     _lineWidth = DEFAULT_WIDTH;
     _lineColor = DEFAULT_COLOR;
     _empty = YES;
+    
+    self.subpaths = [NSMutableArray array];
 }
 
 - (void)drawRect:(CGRect)rect
@@ -117,7 +121,23 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
 {
+    NSLog(@"START");
+    
     UITouch *touch = [touches anyObject];
+    
+    if (touch.tapCount == 2) {
+        [self undo];
+        return;
+    }
+    
+    static int write = 2;
+    if (write > 0) {
+        write -= 1;
+    NSLog(@"writing %ld", self.subpaths.count);
+    self.lastOperationStartIndex = self.subpaths.count;
+    }
+    
+
     
     // initializes our point records to current location
     self.previousPoint = [touch previousLocationInView:self];
@@ -165,9 +185,31 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
     
     // append the quad curve to the accumulated path so far.
     CGPathAddPath(_path, NULL, subpath);
+    NSValue *value = [NSValue valueWithPointer:subpath];
+    [self.subpaths addObject:value];
+    
     CGPathRelease(subpath);
     
     [self setNeedsDisplayInRect:drawBox];
+}
+
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    NSLog(@"END %ld", self.lastOperationStartIndex);
+}
+
+- (void)undo
+{
+    NSArray *subarray = [self.subpaths subarrayWithRange:(NSRange){0, self.lastOperationStartIndex}];
+    CGMutablePathRef newPath = CGPathCreateMutable();
+    for (NSValue *value in subarray) {
+        CGPathRef subpath = (CGPathRef)value.pointerValue;
+        CGPathAddPath(newPath, NULL, subpath);
+    }
+    CFRelease(_path);
+    _path = newPath;
+    [self setNeedsDisplay];
+    
 }
 
 #pragma mark interface
