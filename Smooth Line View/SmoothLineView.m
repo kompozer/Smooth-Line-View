@@ -28,6 +28,9 @@
 
 #import <QuartzCore/QuartzCore.h>
 
+#import "DrawOperation.h"
+#import "DrawSession.h"
+
 #define DEFAULT_COLOR               [UIColor redColor]
 #define DEFAULT_WIDTH               5.0f
 #define DEFAULT_BACKGROUND_COLOR    [UIColor whiteColor]
@@ -37,7 +40,7 @@ static const CGFloat kPointMinDistanceSquared = kPointMinDistance * kPointMinDis
 
 #pragma mark private Helper function
 
-static CGPoint midPoint(CGPoint p1, CGPoint p2) {
+static CGPoint MiddlePoint(CGPoint p1, CGPoint p2) {
     return CGPointMake((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
 }
 
@@ -47,8 +50,11 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 @property (nonatomic, assign) CGPoint currentPoint;
 @property (nonatomic, assign) CGPoint previousPoint;
 @property (nonatomic, assign) CGPoint previousPreviousPoint;
-@property (nonatomic, strong) NSMutableArray *subpaths;
-@property (nonatomic, assign) NSUInteger lastOperationStartIndex;
+
+@property (nonatomic, strong) NSMutableArray *drawOperations;
+@property (nonatomic, strong) DrawOperation *operation;
+@property (nonatomic, strong) DrawSession *session;
+@property (nonatomic) BOOL ignoreTouch;
 
 @end
 
@@ -86,12 +92,13 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 
 - (void)setUpSmoothLineView
 {
+    self.session = [DrawSession new];
+    
     _path = CGPathCreateMutable();
     _lineWidth = DEFAULT_WIDTH;
     _lineColor = DEFAULT_COLOR;
-    _empty = YES;
     
-    self.subpaths = [NSMutableArray array];
+    self.drawOperations = [NSMutableArray array];
 }
 
 - (void)drawRect:(CGRect)rect
@@ -108,11 +115,9 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
     CGContextSetStrokeColorWithColor(context, self.lineColor.CGColor);
     
     CGContextStrokePath(context);
-    
-    self.empty = NO;
 }
 
--(void)dealloc
+- (void)dealloc
 {
     CGPathRelease(_path);
 }
@@ -121,23 +126,11 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
 {
-    NSLog(@"START");
     
     UITouch *touch = [touches anyObject];
     
-    if (touch.tapCount == 2) {
-        [self undo];
-        return;
-    }
+    [self.session beginOperation];
     
-    static int write = 2;
-    if (write > 0) {
-        write -= 1;
-    NSLog(@"writing %ld", self.subpaths.count);
-    self.lastOperationStartIndex = self.subpaths.count;
-    }
-    
-
     
     // initializes our point records to current location
     self.previousPoint = [touch previousLocationInView:self];
@@ -168,8 +161,8 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
     self.previousPoint = [touch previousLocationInView:self];
     self.currentPoint = [touch locationInView:self];
     
-    CGPoint mid1 = midPoint(self.previousPoint, self.previousPreviousPoint);
-    CGPoint mid2 = midPoint(self.currentPoint, self.previousPoint);
+    CGPoint mid1 = MiddlePoint(self.previousPoint, self.previousPreviousPoint);
+    CGPoint mid2 = MiddlePoint(self.currentPoint, self.previousPoint);
     
     // to represent the finger movement, create a new path segment,
     // a quadratic bezier path from mid1 to mid2, using previous as a control point
@@ -185,8 +178,9 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
     
     // append the quad curve to the accumulated path so far.
     CGPathAddPath(_path, NULL, subpath);
-    NSValue *value = [NSValue valueWithPointer:subpath];
-    [self.subpaths addObject:value];
+    
+    [self.session.operation addSubpath:[UIBezierPath bezierPathWithCGPath:subpath]];
+
     
     CGPathRelease(subpath);
     
@@ -195,26 +189,38 @@ static CGPoint midPoint(CGPoint p1, CGPoint p2) {
 
 - (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
 {
-    NSLog(@"END %ld", self.lastOperationStartIndex);
+    if (self.ignoreTouch == YES) {
+        return;
+    }
+
+    [self.session endOperation];
 }
 
 - (void)undo
 {
-    NSArray *subarray = [self.subpaths subarrayWithRange:(NSRange){0, self.lastOperationStartIndex}];
-    CGMutablePathRef newPath = CGPathCreateMutable();
-    for (NSValue *value in subarray) {
-        CGPathRef subpath = (CGPathRef)value.pointerValue;
-        CGPathAddPath(newPath, NULL, subpath);
+    if ([self.session isEmpty]) {
+        return;
     }
+        
+    [self.session removeLastOperation];
+    NSArray *operations = self.session.operations;
+    
+    CGMutablePathRef newPath = CGPathCreateMutable();
+    for (DrawOperation *operation in operations) {
+        for (UIBezierPath *path in operation.subpaths) {
+            CGPathRef subpath = (CGPathRef)path.CGPath;
+            CGPathAddPath(newPath, NULL, subpath);
+        }
+    }
+    
     CFRelease(_path);
     _path = newPath;
     [self setNeedsDisplay];
-    
 }
 
 #pragma mark interface
 
--(void)clear
+- (void)clear
 {
     CGMutablePathRef oldPath = _path;
     CFRelease(oldPath);

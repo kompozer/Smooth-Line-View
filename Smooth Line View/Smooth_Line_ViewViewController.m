@@ -37,6 +37,8 @@
 
 - (void)viewDidLoad
 {
+    [super viewDidLoad];
+    
   SmoothLineView * smoothLineView =[[SmoothLineView alloc] initWithFrame:self.view.bounds ];
   self.canvas = smoothLineView;
   [self.view addSubview:smoothLineView];
@@ -48,7 +50,8 @@
 
 -(void)motionBegan:(UIEventSubtype)motion withEvent:(UIEvent *)event
 {
-  [self.canvas clear];
+//  [self.canvas clear];
+    [self.canvas undo];
 }
 @end
 
